@@ -48,3 +48,7 @@ Built for Vercel (`npm run build` emits the Nitro Vercel preset). When deployed,
 ## License
 
 MIT
+
+---
+
+by ASTRA MATRIX
