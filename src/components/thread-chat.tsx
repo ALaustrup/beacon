@@ -12,11 +12,13 @@ export function ThreadChat({
   actorName,
   authorId,
   language,
+  hideHeading,
 }: {
   incidentId: string;
   actorName: string;
   authorId: string | null;
   language: string;
+  hideHeading?: boolean;
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
@@ -84,7 +86,7 @@ export function ThreadChat({
 
   return (
     <section className="space-y-3">
-      <h2 className="font-display text-lg">Signal thread</h2>
+      {hideHeading ? null : <h2 className="font-display text-lg">Signal thread</h2>}
       <div className="flex min-h-48 flex-col overflow-hidden rounded-xl border border-border bg-surface">
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
           {messages.length === 0 ? (
@@ -112,6 +114,7 @@ export function ThreadChat({
         </div>
         <form onSubmit={(e) => void send(e)} className="flex gap-2 border-t border-border p-2">
           <Input
+            id="incident-message-input"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Update the people helping…"

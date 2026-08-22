@@ -39,6 +39,7 @@ export type Helper = {
   userId: string | null;
   name: string;
   role: string;
+  etaMinutes: number | null;
   createdAt: string;
 };
 

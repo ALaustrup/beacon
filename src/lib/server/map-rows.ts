@@ -53,6 +53,7 @@ export function mapHelper(row: Row): Helper {
     userId: row.user_id == null ? null : String(row.user_id),
     name: String(row.name ?? "Helper"),
     role: String(row.role ?? "local"),
+    etaMinutes: row.eta_minutes == null ? null : asNumber(row.eta_minutes),
     createdAt: asIso(row.created_at),
   };
 }

@@ -100,6 +100,10 @@ export function helpTypeById(id: string) {
   return HELP_TYPES.find((t) => t.id === id) ?? HELP_TYPES[HELP_TYPES.length - 1];
 }
 
+/** Preset commitment times. Do not free-type a clock. */
+export const OFFER_ETA_MINUTES = [5, 10, 20] as const;
+export type OfferEtaMinutes = (typeof OFFER_ETA_MINUTES)[number];
+
 export const INCIDENT_STATUSES = ["open", "assisting", "resolved"] as const;
 export type IncidentStatus = (typeof INCIDENT_STATUSES)[number];
 

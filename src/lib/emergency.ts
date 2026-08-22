@@ -71,6 +71,28 @@ export function emergencyForCountry(code: string | null | undefined): EmergencyI
   };
 }
 
+/** True only when this ISO country is in the verified table — not the 112 fallback. */
+export function hasVerifiedEmergencyNumber(code: string | null | undefined): boolean {
+  if (!code) return false;
+  return Object.prototype.hasOwnProperty.call(BY_COUNTRY, code.toUpperCase());
+}
+
+/**
+ * Specific tel control for a live ticket. Null when the locale is unknown —
+ * callers must use a neutral label and must not invent a number.
+ */
+export function verifiedEmergencyCall(
+  countryCode: string | null | undefined,
+): { label: string; href: string } | null {
+  if (!countryCode || !hasVerifiedEmergencyNumber(countryCode)) return null;
+  const info = BY_COUNTRY[countryCode.toUpperCase()]!;
+  const number = info.ambulance || info.police;
+  return {
+    label: `Call ${number} — local emergency`,
+    href: `tel:${number.replace(/[^\d+]/g, "")}`,
+  };
+}
+
 const PHRASES: Record<string, Record<string, string>> = {
   en: {
     emergency: "This is an emergency. Please send help immediately.",

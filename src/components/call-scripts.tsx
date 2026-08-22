@@ -30,7 +30,7 @@ export function CallScripts({ incident }: { incident: Incident }) {
   }
 
   return (
-    <section className="space-y-3">
+    <section id="call-script" className="space-y-3">
       <div>
         <h2 className="font-display text-lg">Local emergency numbers</h2>
         <p className="text-sm text-muted-foreground">

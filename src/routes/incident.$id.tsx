@@ -6,16 +6,27 @@ import { CallScripts } from "@/components/call-scripts";
 import { ThreadChat } from "@/components/thread-chat";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { statusVariant } from "@/components/incident-card";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { useActorName, useClientState } from "@/lib/client-state";
-import { localEmergencyLinks } from "@/lib/emergency";
+import { verifiedEmergencyCall } from "@/lib/emergency";
 import { bearingLabel, formatDistance, haversineKm } from "@/lib/geo";
-import { helpTypeById, SOS_HOLD_TYPE, SOS_TYPE_CORRECTIONS } from "@/lib/help-types";
 import {
-  addIncidentNote,
+  helpTypeById,
+  OFFER_ETA_MINUTES,
+  SOS_HOLD_TYPE,
+  SOS_TYPE_CORRECTIONS,
+  type OfferEtaMinutes,
+} from "@/lib/help-types";
+import {
   getIncident,
   offerHelp,
   resolveIncident,
@@ -23,7 +34,7 @@ import {
 } from "@/lib/server/incidents";
 import { sendAid } from "@/lib/server/wallet";
 import { useDevice } from "@/lib/use-device";
-import type { IncidentDetail } from "@/lib/types";
+import type { Helper, IncidentDetail } from "@/lib/types";
 import { formatCoord, formatMoney, timeAgo } from "@/lib/utils";
 
 export const Route = createFileRoute("/incident/$id")({ component: IncidentPage });
@@ -32,9 +43,13 @@ function IncidentPage() {
   const { id } = Route.useParams();
   const [detail, setDetail] = useState<IncidentDetail | null>(null);
   const [missing, setMissing] = useState(false);
-  const [note, setNote] = useState("");
   const [aid, setAid] = useState("10");
   const [busy, setBusy] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const [claimRole, setClaimRole] = useState<"local" | "remote" | null>(null);
+  const [claimEta, setClaimEta] = useState<OfferEtaMinutes | null>(null);
   const user = useCurrentUser();
   const guestId = useClientState((s) => s.guestId);
   const language = useClientState((s) => s.language);
@@ -82,43 +97,33 @@ function IncidentPage() {
   const mapsUrl = `https://www.google.com/maps?q=${detail.lat},${detail.lng}`;
   const coords = `${formatCoord(detail.lat)}, ${formatCoord(detail.lng)}`;
   const isCreator = Boolean(detail.requesterId && detail.requesterId === actorId);
-  const telLinks = localEmergencyLinks(detail.countryCode);
-  const showTypeChooser =
-    isCreator && detail.status !== "resolved" && detail.helpType === SOS_HOLD_TYPE;
+  const live = detail.status !== "resolved";
+  const showTypeChooser = isCreator && live && detail.helpType === SOS_HOLD_TYPE;
+  const myClaim = detail.helpers.find((h) => h.userId && h.userId === user?.id) ?? null;
+  const latest = detail.updates[detail.updates.length - 1] ?? null;
+  const distanceLabel =
+    km != null ? `${formatDistance(km)}${bearing ? ` ${bearing}` : ""}` : "Need your GPS";
 
-  async function onOffer(role: "local" | "remote") {
+  async function onOffer() {
     if (!user) {
       toast.error("Sign in to attach your name to an offer.");
       return;
     }
+    if (!claimRole || claimEta == null) {
+      toast.error("Choose nearby or remote, then an arrival time.");
+      return;
+    }
     setBusy(true);
     try {
-      await offerHelp({ data: { incidentId: id, name: actorName, role } });
-      toast.success(role === "local" ? "You are marked as nearby help." : "You are coordinating remotely.");
+      await offerHelp({
+        data: { incidentId: id, name: actorName, role: claimRole, etaMinutes: claimEta },
+      });
+      toast.success(
+        claimRole === "local" ? "You are marked as nearby help." : "You are coordinating remotely.",
+      );
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not offer help.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onNote() {
-    if (!note.trim()) return;
-    setBusy(true);
-    try {
-      await addIncidentNote({
-        data: {
-          incidentId: id,
-          authorId: user?.id ?? guestId,
-          authorName: actorName,
-          body: note,
-        },
-      });
-      setNote("");
-      await refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not post.");
     } finally {
       setBusy(false);
     }
@@ -130,6 +135,7 @@ function IncidentPage() {
       await resolveIncident({
         data: { incidentId: id, authorName: actorName, authorId: actorId },
       });
+      setConfirmClose(false);
       toast.success("Signal closed.");
       await refresh();
     } catch (err) {
@@ -196,6 +202,14 @@ function IncidentPage() {
     });
   }
 
+  function openConversation() {
+    setConversationOpen(true);
+    window.setTimeout(() => {
+      document.getElementById("incident-conversation")?.scrollIntoView({ behavior: "smooth" });
+      document.getElementById("incident-message-input")?.focus();
+    }, 50);
+  }
+
   return (
     <AppShell>
       <div className="mb-4">
@@ -204,37 +218,55 @@ function IncidentPage() {
         </Link>
       </div>
 
-      {isCreator && detail.status !== "resolved" ? (
-        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
-          <span className="font-medium">Live</span>
-          <button
-            type="button"
-            className="text-muted-foreground hover:text-fg"
-            disabled={busy}
-            onClick={() => void onResolve()}
-          >
-            I’m OK — cancel
-          </button>
-          {telLinks.map((link) => (
-            <a key={link.href} href={link.href} className="text-subtle hover:text-fg hover:underline">
-              {link.label}
-            </a>
-          ))}
-        </div>
-      ) : null}
-
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-        <div className="space-y-6">
-          <header className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="font-display text-3xl tracking-tight">{meta.label}</h1>
-              <Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
-              {detail.demo ? <Badge variant="outline">DEMO</Badge> : null}
-            </div>
+      <div className="space-y-6">
+        <header className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="font-display text-3xl tracking-tight">{meta.label}</h1>
+            <Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
+            {detail.demo ? <Badge variant="outline">DEMO</Badge> : null}
+          </div>
+          {isCreator ? (
+            <p className="text-base font-medium">{liveStatus(detail)}</p>
+          ) : (
             <p className="text-muted-foreground">
-              {detail.requesterName} · {detail.locationLabel} · {timeAgo(detail.createdAt)}
+              {detail.requesterName} · {timeAgo(detail.createdAt)} · {distanceLabel}
             </p>
-            <p className="max-w-2xl text-base leading-relaxed">{detail.description}</p>
+          )}
+          {isCreator ? (
+            <p className="text-sm text-muted-foreground">
+              {detail.locationLabel} · {timeAgo(detail.createdAt)}
+            </p>
+          ) : null}
+          <p className="max-w-2xl text-base leading-relaxed">{detail.description}</p>
+        </header>
+
+        <OfficialCall
+          countryCode={detail.countryCode}
+          onNeutralClick={
+            isCreator
+              ? () => {
+                  setScriptOpen(true);
+                  window.setTimeout(() => {
+                    document.getElementById("call-script")?.scrollIntoView({ behavior: "smooth" });
+                  }, 50);
+                }
+              : undefined
+          }
+        />
+
+        {isCreator && live ? (
+          <div>
+            <Button variant="outline" disabled={busy} onClick={() => setConfirmClose(true)}>
+              I’m OK — cancel
+            </Button>
+          </div>
+        ) : null}
+
+        {isCreator ? (
+          <section className="space-y-2">
+            <h2 className="font-display text-lg">Helpers</h2>
+            <HelperList helpers={detail.helpers} empty="Waiting for a helper." />
+            <p className="text-sm text-muted-foreground">{locationQuality(detail)}</p>
             {showTypeChooser ? (
               <div className="flex flex-wrap gap-1.5 pt-1">
                 <span className="self-center text-xs text-subtle">What kind</span>
@@ -252,134 +284,264 @@ function IncidentPage() {
                 ))}
               </div>
             ) : null}
-          </header>
-
-          <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
-            <Fact label="Latitude" value={formatCoord(detail.lat)} />
-            <Fact label="Longitude" value={formatCoord(detail.lng)} />
-            <Fact
-              label="Accuracy"
-              value={detail.accuracyM != null ? `${Math.round(detail.accuracyM)} m` : "—"}
-            />
-            <Fact
-              label="Battery"
-              value={
-                detail.batteryPct != null
-                  ? `${detail.batteryPct}%${detail.charging ? " charging" : ""}`
-                  : "Not reported"
-              }
-            />
-            <Fact label="Can pay" value={detail.canPay ? "Yes" : "No"} />
-            <Fact label="Aid received" value={formatMoney(detail.aidCents)} />
-            <Fact
-              label="Distance"
-              value={
-                km != null
-                  ? `${formatDistance(km)}${bearing ? ` ${bearing}` : ""}`
-                  : "Need your GPS"
-              }
-            />
-            <Fact label="Language" value={detail.language.toUpperCase()} />
-            <Fact label="Country" value={detail.countryCode ?? "—"} />
-          </dl>
-
-          <div className="flex flex-wrap gap-2">
-            <Button asChild>
-              <a href={mapsUrl} target="_blank" rel="noreferrer">
-                Open in maps
-              </a>
-            </Button>
-            <Button variant="outline" onClick={copyCoords}>
-              Copy coordinates
-            </Button>
-            <Button variant="outline" onClick={shareSignal}>
-              Share signal
-            </Button>
-            <Button variant="outline" disabled={busy} onClick={() => void onOffer("local")}>
-              I can help nearby
-            </Button>
-            <Button variant="outline" disabled={busy} onClick={() => void onOffer("remote")}>
-              Coordinate remotely
-            </Button>
-            {isCreator && detail.status !== "resolved" ? (
-              <Button variant="ghost" disabled={busy} onClick={() => void onResolve()}>
-                Mark resolved
-              </Button>
-            ) : null}
-          </div>
-
-          <CallScripts incident={detail} />
-
-          <ThreadChat
-            incidentId={id}
-            actorName={actorName}
-            authorId={user?.id ?? guestId}
-            language={language}
-          />
-
-          <section className="space-y-3">
-            <h2 className="font-display text-lg">Log</h2>
-            <ul className="space-y-2">
-              {detail.updates.map((u) => (
-                <li key={u.id} className="border-border border-l-2 pl-3 text-sm">
-                  <p className="text-xs text-subtle">
-                    {u.authorName} · {u.kind} · {timeAgo(u.createdAt)}
-                  </p>
-                  <p>{u.body}</p>
-                </li>
-              ))}
-            </ul>
-            <div className="flex gap-2">
-              <Textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="Update the people helping — what you see, what you called, what is still needed."
-              />
-            </div>
-            <Button variant="secondary" disabled={busy} onClick={() => void onNote()}>
-              Post update
-            </Button>
           </section>
-        </div>
+        ) : null}
 
-        <aside className="space-y-4">
-          <section className="rounded-xl border border-border bg-surface p-4">
-            <h2 className="font-display text-lg">Helpers</h2>
-            {detail.helpers.length === 0 ? (
-              <p className="mt-2 text-sm text-muted-foreground">No one has claimed this yet.</p>
+        {!isCreator && live ? (
+          <section className="space-y-3">
+            <div>
+              <h2 className="font-display text-lg">Already responding</h2>
+              <HelperList helpers={detail.helpers} empty="No one has claimed this yet." />
+            </div>
+            <CallScripts incident={detail} />
+            {myClaim ? (
+              <p className="text-sm">
+                You are helping · {roleLabel(myClaim.role)}
+                {etaLabel(myClaim.etaMinutes)}
+              </p>
             ) : (
-              <ul className="mt-3 space-y-2 text-sm">
-                {detail.helpers.map((h) => (
-                  <li key={h.id} className="flex justify-between gap-2">
-                    <span>{h.name}</span>
-                    <span className="text-subtle">{h.role}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
+                <h2 className="font-display text-lg">I can help</h2>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant={claimRole === "local" ? "default" : "outline"}
+                    disabled={busy}
+                    onClick={() => setClaimRole("local")}
+                  >
+                    Nearby
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={claimRole === "remote" ? "default" : "outline"}
+                    disabled={busy}
+                    onClick={() => setClaimRole("remote")}
+                  >
+                    Remote
+                  </Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-subtle">ETA</span>
+                  {OFFER_ETA_MINUTES.map((m) => (
+                    <Button
+                      key={m}
+                      type="button"
+                      size="sm"
+                      variant={claimEta === m ? "default" : "outline"}
+                      disabled={busy}
+                      onClick={() => setClaimEta(m)}
+                    >
+                      {m} min
+                    </Button>
+                  ))}
+                </div>
+                <Button disabled={busy || !claimRole || claimEta == null} onClick={() => void onOffer()}>
+                  Confirm I can help
+                </Button>
+              </div>
             )}
           </section>
+        ) : null}
 
-          <section className="rounded-xl border border-border bg-surface p-4">
-            <h2 className="font-display text-lg">Send aid</h2>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Instant Beacon credit for food, fuel, a ride, or a room. Sign in required.
+        {!isCreator && !live ? <CallScripts incident={detail} /> : null}
+
+        <section className="space-y-2">
+          <h2 className="font-display text-lg">Latest</h2>
+          {latest ? (
+            <p className="text-sm">
+              <span className="text-subtle">{latest.authorName} · {timeAgo(latest.createdAt)} · </span>
+              {latest.body}
             </p>
-            <div className="mt-3 flex gap-2">
-              <Input
-                inputMode="decimal"
-                value={aid}
-                onChange={(e) => setAid(e.target.value)}
-                aria-label="Amount in dollars"
-              />
-              <Button disabled={busy} onClick={() => void onSendAid()}>
-                Send
+          ) : (
+            <p className="text-sm text-muted-foreground">No updates yet.</p>
+          )}
+          <Button variant="outline" size="sm" onClick={openConversation}>
+            Message
+          </Button>
+        </section>
+
+        {isCreator ? (
+          <details
+            className="rounded-xl border border-border bg-surface p-4"
+            open={scriptOpen}
+            onToggle={(e) => setScriptOpen((e.target as HTMLDetailsElement).open)}
+          >
+            <summary className="font-display cursor-pointer text-lg">What to say</summary>
+            <div className="mt-3">
+              <CallScripts incident={detail} />
+            </div>
+          </details>
+        ) : null}
+
+        <details
+          id="incident-conversation"
+          className="rounded-xl border border-border bg-surface p-4"
+          open={conversationOpen}
+          onToggle={(e) => setConversationOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary className="font-display cursor-pointer text-lg">Conversation</summary>
+          <div className="mt-3">
+            <ThreadChat
+              incidentId={id}
+              actorName={actorName}
+              authorId={user?.id ?? guestId}
+              language={language}
+              hideHeading
+            />
+          </div>
+        </details>
+
+        <details className="rounded-xl border border-border bg-surface p-4">
+          <summary className="font-display cursor-pointer text-lg">More</summary>
+          <div className="mt-4 space-y-4">
+            <div className="flex flex-wrap gap-2">
+              <Button asChild>
+                <a href={mapsUrl} target="_blank" rel="noreferrer">
+                  Open in maps
+                </a>
+              </Button>
+              <Button variant="outline" onClick={copyCoords}>
+                Copy coordinates
+              </Button>
+              <Button variant="outline" onClick={shareSignal}>
+                Share signal
               </Button>
             </div>
-          </section>
-        </aside>
+            <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+              <Fact label="Latitude" value={formatCoord(detail.lat)} />
+              <Fact label="Longitude" value={formatCoord(detail.lng)} />
+              <Fact
+                label="Accuracy"
+                value={detail.accuracyM != null ? `${Math.round(detail.accuracyM)} m` : "—"}
+              />
+              <Fact
+                label="Battery"
+                value={
+                  detail.batteryPct != null
+                    ? `${detail.batteryPct}%${detail.charging ? " charging" : ""}`
+                    : "Not reported"
+                }
+              />
+              <Fact label="Can pay" value={detail.canPay ? "Yes" : "No"} />
+              <Fact label="Aid received" value={formatMoney(detail.aidCents)} />
+              <Fact label="Distance" value={distanceLabel} />
+              <Fact label="Language" value={detail.language.toUpperCase()} />
+              <Fact label="Country" value={detail.countryCode ?? "—"} />
+            </dl>
+            <div>
+              <h3 className="font-display text-lg">Send aid</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {detail.demo
+                  ? "Demo credit — not real money."
+                  : "Instant Beacon credit for food, fuel, a ride, or a room. Sign in required."}
+              </p>
+              <div className="mt-3 flex gap-2">
+                <Input
+                  inputMode="decimal"
+                  value={aid}
+                  onChange={(e) => setAid(e.target.value)}
+                  aria-label="Amount in dollars"
+                />
+                <Button disabled={busy} onClick={() => void onSendAid()}>
+                  Send
+                </Button>
+              </div>
+            </div>
+          </div>
+        </details>
       </div>
+
+      <Dialog open={confirmClose} onOpenChange={setConfirmClose}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close this signal?</DialogTitle>
+            <DialogDescription>
+              This closes the signal. Helpers should stop coming.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="outline" onClick={() => setConfirmClose(false)}>
+              Keep it live
+            </Button>
+            <Button disabled={busy} onClick={() => void onResolve()}>
+              I’m OK — cancel
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </AppShell>
   );
+}
+
+function OfficialCall({
+  countryCode,
+  onNeutralClick,
+}: {
+  countryCode: string | null;
+  onNeutralClick?: () => void;
+}) {
+  const verified = verifiedEmergencyCall(countryCode);
+  if (verified) {
+    return (
+      <Button asChild size="lg">
+        <a href={verified.href}>{verified.label}</a>
+      </Button>
+    );
+  }
+  if (onNeutralClick) {
+    return (
+      <Button size="lg" onClick={onNeutralClick}>
+        Call local emergency
+      </Button>
+    );
+  }
+  return (
+    <Button asChild size="lg">
+      <a href="#call-script">Call local emergency</a>
+    </Button>
+  );
+}
+
+function HelperList({ helpers, empty }: { helpers: Helper[]; empty: string }) {
+  if (helpers.length === 0) {
+    return <p className="text-sm text-muted-foreground">{empty}</p>;
+  }
+  return (
+    <ul className="space-y-1 text-sm">
+      {helpers.map((h) => (
+        <li key={h.id}>
+          {h.name}
+          <span className="text-subtle">
+            {" "}
+            · {roleLabel(h.role)}
+            {etaLabel(h.etaMinutes)}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function liveStatus(detail: IncidentDetail) {
+  if (detail.status === "resolved") return "Closed";
+  if (detail.helpers.length === 0) return "Waiting for a helper";
+  if (detail.helpers.length === 1) return "1 person responding";
+  return `${detail.helpers.length} people responding`;
+}
+
+function locationQuality(detail: IncidentDetail) {
+  if (detail.accuracyM != null) {
+    return `GPS ±${Math.round(detail.accuracyM)} m`;
+  }
+  return `Last known · ${detail.locationLabel}`;
+}
+
+function roleLabel(role: string) {
+  return role === "local" ? "nearby" : role === "remote" ? "remote" : role;
+}
+
+function etaLabel(minutes: number | null) {
+  return minutes == null ? "" : ` · ${minutes} min`;
 }
 
 function Fact({ label, value }: { label: string; value: string }) {

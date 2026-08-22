@@ -3,7 +3,7 @@ import { getSql } from "@/lib/db";
 import { isBeaconDemo } from "@/lib/demo-flag";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { reverseGeocode, haversineKm } from "@/lib/geo";
-import { HELP_TYPE_IDS, SOS_TYPE_CORRECTIONS } from "@/lib/help-types";
+import { HELP_TYPE_IDS, OFFER_ETA_MINUTES, SOS_TYPE_CORRECTIONS } from "@/lib/help-types";
 import { uid } from "@/lib/utils";
 import { mapHelper, mapIncident, mapUpdate } from "./map-rows";
 import { ensureSeeded, maybeEmitLiveIncident } from "./seed";
@@ -183,20 +183,39 @@ export const addIncidentNote = createServerFn({ method: "POST" })
 
 export const offerHelp = createServerFn({ method: "POST" })
   .middleware([authMiddleware])
-  .validator((input: { incidentId: string; name: string; role: "local" | "remote" }) => input)
+  .validator((input: {
+    incidentId: string;
+    name: string;
+    role: "local" | "remote";
+    etaMinutes: number;
+  }) => input)
   .handler(async ({ context, data }) => {
+    const eta = data.etaMinutes;
+    if (!OFFER_ETA_MINUTES.includes(eta as (typeof OFFER_ETA_MINUTES)[number])) {
+      throw new Error("Choose 5, 10, or 20 minutes.");
+    }
     const sql = await getSql();
-    const existing = await sql`
+    const existing = await sql<{ id: string }>`
       select id from helpers
       where incident_id = ${data.incidentId} and user_id = ${context.userId}
       limit 1
     `;
     if (existing.length === 0) {
       await sql`
-        insert into helpers (id, incident_id, user_id, name, role)
-        values (${uid()}, ${data.incidentId}, ${context.userId}, ${data.name}, ${data.role})
+        insert into helpers (id, incident_id, user_id, name, role, eta_minutes)
+        values (${uid()}, ${data.incidentId}, ${context.userId}, ${data.name}, ${data.role}, ${eta})
+      `;
+    } else {
+      await sql`
+        update helpers
+        set eta_minutes = ${eta}
+        where id = ${existing[0]!.id}
       `;
     }
+    const body =
+      data.role === "local"
+        ? `A nearby helper is on the way. ETA ${eta} minutes.`
+        : `A remote helper is coordinating local resources. ETA ${eta} minutes.`;
     await sql`
       update incidents
       set status = case when status = 'resolved' then status else 'assisting' end,
@@ -207,7 +226,7 @@ export const offerHelp = createServerFn({ method: "POST" })
       insert into incident_updates (id, incident_id, author_id, author_name, kind, body)
       values (
         ${uid()}, ${data.incidentId}, ${context.userId}, ${data.name}, ${"offer"},
-        ${data.role === "local" ? "A nearby helper is on the way." : "A remote helper is coordinating local resources."}
+        ${body}
       )
     `;
     return { ok: true as const };
