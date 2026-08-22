@@ -158,6 +158,9 @@ export function WorldMap({
           }}
         >
           <p className="text-xs font-medium">{helpTypeById(selected.inc.helpType).label}</p>
+          {selected.inc.demo ? (
+            <p className="text-[10px] tracking-wide text-subtle uppercase">Demo</p>
+          ) : null}
           <p className="truncate text-xs text-muted-foreground">
             {selected.inc.requesterName} · {selected.inc.locationLabel}
           </p>

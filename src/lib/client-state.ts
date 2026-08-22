@@ -12,24 +12,27 @@ type ClientState = {
   notifyOn: boolean;
   lastSeenIso: string;
   manualFix: ManualFix | null;
+  sosConsentAt: string | null;
   setDisplayName: (name: string) => void;
-  setLanguage: (lang: string) => void;
+  setLanguage: (language: string) => void;
   setRadiusKm: (km: number | null) => void;
   setNotifyOn: (on: boolean) => void;
   setManualFix: (fix: ManualFix | null) => void;
   markSeen: (iso: string) => void;
+  recordSosConsent: () => void;
 };
 
 export const useClientState = create<ClientState>()(
   persist(
     (set, get) => ({
-      guestId: "guest",
+      guestId: uid(),
       displayName: "",
       language: "en",
       radiusKm: null,
       notifyOn: true,
       lastSeenIso: "",
       manualFix: null,
+      sosConsentAt: null,
       setDisplayName: (displayName) => set({ displayName }),
       setLanguage: (language) => set({ language }),
       setRadiusKm: (radiusKm) => set({ radiusKm }),
@@ -37,6 +40,9 @@ export const useClientState = create<ClientState>()(
       setManualFix: (manualFix) => set({ manualFix }),
       markSeen: (iso) => {
         if (!get().lastSeenIso || iso > get().lastSeenIso) set({ lastSeenIso: iso });
+      },
+      recordSosConsent: () => {
+        if (!get().sosConsentAt) set({ sosConsentAt: new Date().toISOString() });
       },
     }),
     {
@@ -49,6 +55,7 @@ export const useClientState = create<ClientState>()(
         notifyOn: s.notifyOn,
         lastSeenIso: s.lastSeenIso,
         manualFix: s.manualFix,
+        sosConsentAt: s.sosConsentAt,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;

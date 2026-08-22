@@ -1,4 +1,5 @@
 import { getSql } from "@/lib/db";
+import { isBeaconDemo } from "@/lib/demo-flag";
 import { uid } from "@/lib/utils";
 
 type SeedIncident = {
@@ -168,7 +169,9 @@ const CHAT_SEEDS = [
 ];
 
 export async function ensureSeeded(): Promise<void> {
+  if (!isBeaconDemo()) return;
   const sql = await getSql();
+  await sql`update incidents set demo = true where requester_id is null and demo = false`;
   const countRows = await sql<{ n: number }>`select count(*)::int as n from incidents`;
   const n = Number(countRows[0]?.n ?? 0);
   if (n > 0) return;
@@ -181,19 +184,19 @@ export async function ensureSeeded(): Promise<void> {
     await sql`
       insert into incidents (
         id, requester_name, help_type, description, lat, lng, location_label,
-        country_code, battery_pct, charging, can_pay, language, status,
+        country_code, battery_pct, charging, can_pay, language, status, demo,
         created_at, updated_at, resolved_at
       ) values (
         ${id}, ${seed.name}, ${seed.type}, ${seed.description}, ${seed.lat}, ${seed.lng},
         ${seed.label}, ${seed.country}, ${seed.battery}, ${false}, ${seed.canPay},
-        ${seed.language}, ${seed.status}, ${created}, ${created}, ${resolved}
+        ${seed.language}, ${seed.status}, ${true}, ${created}, ${created}, ${resolved}
       )
     `;
     await sql`
       insert into incident_updates (id, incident_id, author_name, kind, body, created_at)
       values (
         ${uid()}, ${id}, ${"Beacon"}, ${"status"},
-        ${`Signal opened from ${seed.label}.`}, ${created}
+        ${`DEMO signal opened from ${seed.label}.`}, ${created}
       )
     `;
     if (seed.status !== "open") {
@@ -278,6 +281,7 @@ const LIVE_POOL: SeedIncident[] = [
 ];
 
 export async function maybeEmitLiveIncident(): Promise<boolean> {
+  if (!isBeaconDemo()) return false;
   const sql = await getSql();
   const recent = await sql<{ n: number }>`
     select count(*)::int as n from incidents
@@ -298,17 +302,17 @@ export async function maybeEmitLiveIncident(): Promise<boolean> {
   await sql`
     insert into incidents (
       id, requester_name, help_type, description, lat, lng, location_label,
-      country_code, battery_pct, charging, can_pay, language, status,
+      country_code, battery_pct, charging, can_pay, language, status, demo,
       created_at, updated_at
     ) values (
       ${id}, ${pick.name}, ${pick.type}, ${pick.description}, ${jitterLat}, ${jitterLng},
       ${pick.label}, ${pick.country}, ${pick.battery}, ${false}, ${pick.canPay},
-      ${pick.language}, ${"open"}, ${created}, ${created}
+      ${pick.language}, ${"open"}, ${true}, ${created}, ${created}
     )
   `;
   await sql`
     insert into incident_updates (id, incident_id, author_name, kind, body)
-    values (${uid()}, ${id}, ${"Beacon"}, ${"status"}, ${`Live signal from ${pick.label}.`})
+    values (${uid()}, ${id}, ${"Beacon"}, ${"status"}, ${`DEMO live signal from ${pick.label}.`})
   `;
   return true;
 }

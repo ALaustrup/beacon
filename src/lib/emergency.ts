@@ -349,7 +349,25 @@ const TYPE_KEYS: Record<string, string> = {
   shelter: "shelter",
   food: "food",
   stranded: "emergency",
+  emergency: "emergency",
 };
+
+export function localEmergencyLinks(
+  countryCode: string | null | undefined,
+): { label: string; href: string }[] {
+  if (!countryCode) {
+    return [
+      { label: "Call 112 — local emergency", href: "tel:112" },
+      { label: "Call 911", href: "tel:911" },
+    ];
+  }
+  const info = emergencyForCountry(countryCode);
+  const unique = [...new Set([info.ambulance, info.police, info.fire])];
+  return unique.map((n, i) => ({
+    label: i === 0 ? `Call ${n} — local emergency` : `Call ${n}`,
+    href: `tel:${n.replace(/[^\d+]/g, "")}`,
+  }));
+}
 
 export function buildCallScript(opts: {
   helpType: string;

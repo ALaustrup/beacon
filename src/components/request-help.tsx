@@ -3,7 +3,8 @@ import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { useClientState } from "@/lib/client-state";
-import { HELP_TYPES, LANGUAGES } from "@/lib/help-types";
+import { localEmergencyLinks } from "@/lib/emergency";
+import { SOS_HOLD_TYPE, SPECIFIC_HELP_TYPES, LANGUAGES } from "@/lib/help-types";
 import { createIncident } from "@/lib/server/incidents";
 import { lookupCity } from "@/lib/server/lookup";
 import type { DeviceTelemetry } from "@/lib/types";
@@ -42,10 +43,12 @@ export function RequestHelp({ device, onCreated }: Props) {
   const language = useClientState((s) => s.language);
   const setLanguage = useClientState((s) => s.setLanguage);
   const setManualFix = useClientState((s) => s.setManualFix);
+  const recordSosConsent = useClientState((s) => s.recordSosConsent);
   const navigate = useNavigate();
 
   const name = user?.displayName || displayName;
   const hasFix = device.lat != null && device.lng != null;
+  const telLinks = localEmergencyLinks(null);
 
   async function submit(type: string, desc: string, pay: boolean) {
     if (device.lat == null || device.lng == null) {
@@ -54,6 +57,7 @@ export function RequestHelp({ device, onCreated }: Props) {
     }
     setBusy(true);
     try {
+      recordSosConsent();
       const incident = await createIncident({
         data: {
           requesterId: user?.id ?? guestId,
@@ -69,7 +73,9 @@ export function RequestHelp({ device, onCreated }: Props) {
           language: user ? language : device.language,
         },
       });
-      toast.success("Signal sent. The network is being alerted.");
+      toast.success("Signal is live.", {
+        description: "People with Beacon open nearby may see it.",
+      });
       setOpen(false);
       onCreated?.();
       void navigate({ to: "/incident/$id", params: { id: incident.id } });
@@ -105,7 +111,9 @@ export function RequestHelp({ device, onCreated }: Props) {
         <SosButton
           busy={busy}
           disabled={!hasFix}
-          onSend={() => submit("medical", description || "Emergency. Please send help now.", canPay)}
+          onSend={() =>
+            submit(SOS_HOLD_TYPE, description || "Emergency. Please send help now.", canPay)
+          }
         />
         <Button
           variant="outline"
@@ -116,6 +124,19 @@ export function RequestHelp({ device, onCreated }: Props) {
           Request specific help
         </Button>
       </div>
+      <p className="text-xs text-muted-foreground">
+        Sending shares your location with people who can help. Beacon is not 911.
+      </p>
+      <p className="text-xs text-subtle">
+        {telLinks.map((link, i) => (
+          <span key={link.href}>
+            {i > 0 ? " · " : null}
+            <a href={link.href} className="hover:text-fg hover:underline">
+              {link.label}
+            </a>
+          </span>
+        ))}
+      </p>
       {!hasFix ? (
         <form onSubmit={(e) => void useCity(e)} className="space-y-2">
           <p className="text-xs text-warn">
@@ -165,7 +186,7 @@ export function RequestHelp({ device, onCreated }: Props) {
             <div className="space-y-2">
               <Label>What do you need</Label>
               <div className="grid grid-cols-2 gap-1.5">
-                {HELP_TYPES.map((t) => (
+                {SPECIFIC_HELP_TYPES.map((t) => (
                   <button
                     key={t.id}
                     type="button"

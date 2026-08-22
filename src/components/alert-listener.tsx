@@ -46,12 +46,6 @@ export function AlertListener({
   }, [lastSeenIso]);
 
   useEffect(() => {
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      void Notification.requestPermission();
-    }
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
     const tick = async () => {
       const since = lastSeenRef.current || new Date().toISOString();

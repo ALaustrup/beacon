@@ -1,5 +1,11 @@
 export const HELP_TYPES = [
   {
+    id: "emergency",
+    label: "Emergency",
+    short: "Unspecified — sent from SOS",
+    urgency: "critical",
+  },
+  {
     id: "medical",
     label: "Medical",
     short: "Fallen, injured, or unwell",
@@ -77,6 +83,18 @@ export type HelpTypeId = (typeof HELP_TYPES)[number]["id"];
 export type HelpUrgency = (typeof HELP_TYPES)[number]["urgency"];
 
 export const HELP_TYPE_IDS = HELP_TYPES.map((t) => t.id);
+
+/** Types shown in “Request specific help”. SOS-only `emergency` is excluded so that grid is unchanged. */
+export const SPECIFIC_HELP_TYPES = HELP_TYPES.filter((t) => t.id !== "emergency");
+
+export const SOS_HOLD_TYPE = "emergency" as const;
+
+/** Post-signal chooser. Never blocks the hold. */
+export const SOS_TYPE_CORRECTIONS = [
+  { id: "medical", label: "Medical" },
+  { id: "stranded", label: "Stuck" },
+  { id: "safety", label: "Unsafe" },
+] as const;
 
 export function helpTypeById(id: string) {
   return HELP_TYPES.find((t) => t.id === id) ?? HELP_TYPES[HELP_TYPES.length - 1];

@@ -11,13 +11,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { statusVariant } from "@/components/incident-card";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { useActorName, useClientState } from "@/lib/client-state";
+import { localEmergencyLinks } from "@/lib/emergency";
 import { bearingLabel, formatDistance, haversineKm } from "@/lib/geo";
-import { helpTypeById } from "@/lib/help-types";
+import { helpTypeById, SOS_HOLD_TYPE, SOS_TYPE_CORRECTIONS } from "@/lib/help-types";
 import {
   addIncidentNote,
   getIncident,
   offerHelp,
   resolveIncident,
+  updateIncidentType,
 } from "@/lib/server/incidents";
 import { sendAid } from "@/lib/server/wallet";
 import { useDevice } from "@/lib/use-device";
@@ -38,6 +40,7 @@ function IncidentPage() {
   const language = useClientState((s) => s.language);
   const actorName = useActorName(user?.displayName);
   const device = useDevice();
+  const actorId = user?.id ?? guestId;
 
   async function refresh() {
     const row = await getIncident({ data: id });
@@ -78,6 +81,10 @@ function IncidentPage() {
       : null;
   const mapsUrl = `https://www.google.com/maps?q=${detail.lat},${detail.lng}`;
   const coords = `${formatCoord(detail.lat)}, ${formatCoord(detail.lng)}`;
+  const isCreator = Boolean(detail.requesterId && detail.requesterId === actorId);
+  const telLinks = localEmergencyLinks(detail.countryCode);
+  const showTypeChooser =
+    isCreator && detail.status !== "resolved" && detail.helpType === SOS_HOLD_TYPE;
 
   async function onOffer(role: "local" | "remote") {
     if (!user) {
@@ -121,12 +128,26 @@ function IncidentPage() {
     setBusy(true);
     try {
       await resolveIncident({
-        data: { incidentId: id, authorName: actorName, authorId: user?.id ?? guestId },
+        data: { incidentId: id, authorName: actorName, authorId: actorId },
       });
       toast.success("Signal closed.");
       await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not close.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onCorrectType(helpType: string) {
+    setBusy(true);
+    try {
+      await updateIncidentType({
+        data: { incidentId: id, helpType, authorId: actorId, authorName: actorName },
+      });
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update type.");
     } finally {
       setBusy(false);
     }
@@ -183,17 +204,54 @@ function IncidentPage() {
         </Link>
       </div>
 
+      {isCreator && detail.status !== "resolved" ? (
+        <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm">
+          <span className="font-medium">Live</span>
+          <button
+            type="button"
+            className="text-muted-foreground hover:text-fg"
+            disabled={busy}
+            onClick={() => void onResolve()}
+          >
+            I’m OK — cancel
+          </button>
+          {telLinks.map((link) => (
+            <a key={link.href} href={link.href} className="text-subtle hover:text-fg hover:underline">
+              {link.label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-6">
           <header className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="font-display text-3xl tracking-tight">{meta.label}</h1>
               <Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
+              {detail.demo ? <Badge variant="outline">DEMO</Badge> : null}
             </div>
             <p className="text-muted-foreground">
               {detail.requesterName} · {detail.locationLabel} · {timeAgo(detail.createdAt)}
             </p>
             <p className="max-w-2xl text-base leading-relaxed">{detail.description}</p>
+            {showTypeChooser ? (
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                <span className="self-center text-xs text-subtle">What kind</span>
+                {SOS_TYPE_CORRECTIONS.map((c) => (
+                  <Button
+                    key={c.id}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => void onCorrectType(c.id)}
+                  >
+                    {c.label}
+                  </Button>
+                ))}
+              </div>
+            ) : null}
           </header>
 
           <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
@@ -243,7 +301,7 @@ function IncidentPage() {
             <Button variant="outline" disabled={busy} onClick={() => void onOffer("remote")}>
               Coordinate remotely
             </Button>
-            {detail.status !== "resolved" ? (
+            {isCreator && detail.status !== "resolved" ? (
               <Button variant="ghost" disabled={busy} onClick={() => void onResolve()}>
                 Mark resolved
               </Button>

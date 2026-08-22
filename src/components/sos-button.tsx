@@ -62,7 +62,7 @@ export function SosButton({
       onPointerCancel={cancel}
       onContextMenu={(e) => e.preventDefault()}
       className={cn(
-        "sos-hold relative h-16 flex-1 overflow-hidden rounded-xl bg-destructive text-base font-medium text-destructive-foreground select-none",
+        "sos-hold relative h-16 flex-[1.2] overflow-hidden rounded-xl bg-destructive text-base font-medium text-destructive-foreground select-none",
         "focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
         "disabled:opacity-40",
       )}

@@ -1,12 +1,42 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getSql } from "@/lib/db";
+import { isBeaconDemo } from "@/lib/demo-flag";
 import { authMiddleware } from "@/lib/auth/middleware";
-import { reverseGeocode } from "@/lib/geo";
-import { HELP_TYPE_IDS } from "@/lib/help-types";
+import { reverseGeocode, haversineKm } from "@/lib/geo";
+import { HELP_TYPE_IDS, SOS_TYPE_CORRECTIONS } from "@/lib/help-types";
 import { uid } from "@/lib/utils";
 import { mapHelper, mapIncident, mapUpdate } from "./map-rows";
 import { ensureSeeded, maybeEmitLiveIncident } from "./seed";
 import type { Incident, IncidentDetail } from "@/lib/types";
+
+const MERGE_METERS = 200;
+const WINDOW_MS = 10 * 60 * 1000;
+const MAX_CREATES_IN_WINDOW = 3;
+
+async function recentForRequester(requesterId: string) {
+  const sql = await getSql();
+  const since = new Date(Date.now() - WINDOW_MS).toISOString();
+  return sql`
+    select * from incidents
+    where requester_id = ${requesterId}
+      and created_at > ${since}
+    order by created_at desc
+  `;
+}
+
+async function requireCreator(incidentId: string, authorId: string | null | undefined) {
+  if (!authorId) {
+    throw new Error("Only the person who sent this signal can change it.");
+  }
+  const sql = await getSql();
+  const rows = await sql<{ requester_id: string | null }>`
+    select requester_id from incidents where id = ${incidentId} limit 1
+  `;
+  const rid = rows[0]?.requester_id;
+  if (!rid || String(rid) !== authorId) {
+    throw new Error("Only the person who sent this signal can change it.");
+  }
+}
 
 export const listIncidents = createServerFn({ method: "GET" })
   .validator((input: { includeResolved?: boolean } | undefined) => input ?? {})
@@ -14,14 +44,24 @@ export const listIncidents = createServerFn({ method: "GET" })
     await ensureSeeded();
     await maybeEmitLiveIncident();
     const sql = await getSql();
+    const demo = isBeaconDemo();
     const rows = data.includeResolved
-      ? await sql`select * from incidents order by created_at desc limit 200`
-      : await sql`
-          select * from incidents
-          where status <> 'resolved'
-          order by created_at desc
-          limit 200
-        `;
+      ? demo
+        ? await sql`select * from incidents order by created_at desc limit 200`
+        : await sql`select * from incidents where demo = false order by created_at desc limit 200`
+      : demo
+        ? await sql`
+            select * from incidents
+            where status <> 'resolved'
+            order by created_at desc
+            limit 200
+          `
+        : await sql`
+            select * from incidents
+            where status <> 'resolved' and demo = false
+            order by created_at desc
+            limit 200
+          `;
     return rows.map(mapIncident);
   });
 
@@ -32,6 +72,7 @@ export const getIncident = createServerFn({ method: "GET" })
     const rows = await sql`select * from incidents where id = ${id} limit 1`;
     const incident = rows[0] ? mapIncident(rows[0]) : null;
     if (!incident) return null;
+    if (incident.demo && !isBeaconDemo()) return null;
     const updates = await sql`
       select * from incident_updates where incident_id = ${id} order by created_at asc
     `;
@@ -65,12 +106,30 @@ export const createIncident = createServerFn({ method: "POST" })
     if (!Number.isFinite(data.lat) || !Number.isFinite(data.lng)) {
       throw new Error("A live location is required to request help.");
     }
+    if (data.lat < -90 || data.lat > 90 || data.lng < -180 || data.lng > 180) {
+      throw new Error("That location is not valid.");
+    }
     const helpType = HELP_TYPE_IDS.includes(data.helpType as (typeof HELP_TYPE_IDS)[number])
       ? data.helpType
       : "other";
     const name = data.requesterName.trim() || "Someone nearby";
     const description =
       data.description.trim() || "Help needed. Location attached from the device.";
+    const requesterId = data.requesterId ?? null;
+
+    if (requesterId) {
+      const recent = (await recentForRequester(requesterId)).map(mapIncident);
+      const nearbyOpen = recent.find(
+        (row) =>
+          row.status !== "resolved" &&
+          haversineKm(row.lat, row.lng, data.lat, data.lng) * 1000 <= MERGE_METERS,
+      );
+      if (nearbyOpen) return nearbyOpen;
+      if (recent.length >= MAX_CREATES_IN_WINDOW) {
+        throw new Error("Too many signals. Open your existing ticket or wait a few minutes.");
+      }
+    }
+
     const geo = await reverseGeocode(data.lat, data.lng);
     const id = uid();
     const sql = await getSql();
@@ -78,19 +137,19 @@ export const createIncident = createServerFn({ method: "POST" })
       insert into incidents (
         id, requester_id, requester_name, help_type, description, lat, lng,
         location_label, country_code, accuracy_m, battery_pct, charging,
-        can_pay, language, status
+        can_pay, language, status, demo
       ) values (
-        ${id}, ${data.requesterId ?? null}, ${name}, ${helpType}, ${description},
+        ${id}, ${requesterId}, ${name}, ${helpType}, ${description},
         ${data.lat}, ${data.lng}, ${geo.label}, ${geo.countryCode},
         ${data.accuracyM ?? null}, ${data.batteryPct ?? null}, ${data.charging ?? null},
-        ${data.canPay}, ${data.language || "en"}, ${"open"}
+        ${data.canPay}, ${data.language || "en"}, ${"open"}, ${false}
       )
     `;
     await sql`
       insert into incident_updates (id, incident_id, author_id, author_name, kind, body)
       values (
-        ${uid()}, ${id}, ${data.requesterId ?? null}, ${name}, ${"status"},
-        ${"Help requested. Coordinates broadcast to the network."}
+        ${uid()}, ${id}, ${requesterId}, ${name}, ${"status"},
+        ${"Help requested. Coordinates attached to this signal."}
       )
     `;
     const rows = await sql`select * from incidents where id = ${id} limit 1`;
@@ -157,6 +216,7 @@ export const offerHelp = createServerFn({ method: "POST" })
 export const resolveIncident = createServerFn({ method: "POST" })
   .validator((input: { incidentId: string; authorName: string; authorId?: string | null }) => input)
   .handler(async ({ data }) => {
+    await requireCreator(data.incidentId, data.authorId);
     const sql = await getSql();
     await sql`
       update incidents
@@ -173,17 +233,51 @@ export const resolveIncident = createServerFn({ method: "POST" })
     return { ok: true as const };
   });
 
+const CORRECTION_IDS = SOS_TYPE_CORRECTIONS.map((c) => c.id);
+
+export const updateIncidentType = createServerFn({ method: "POST" })
+  .validator((input: { incidentId: string; helpType: string; authorId?: string | null; authorName: string }) => input)
+  .handler(async ({ data }) => {
+    await requireCreator(data.incidentId, data.authorId);
+    if (!CORRECTION_IDS.includes(data.helpType as (typeof CORRECTION_IDS)[number])) {
+      throw new Error("Choose medical, stuck, or unsafe.");
+    }
+    const sql = await getSql();
+    await sql`
+      update incidents
+      set help_type = ${data.helpType}, updated_at = now()
+      where id = ${data.incidentId} and status <> 'resolved'
+    `;
+    await sql`
+      insert into incident_updates (id, incident_id, author_id, author_name, kind, body)
+      values (
+        ${uid()}, ${data.incidentId}, ${data.authorId ?? null},
+        ${data.authorName || "Someone"}, ${"status"},
+        ${`Type updated to ${data.helpType}.`}
+      )
+    `;
+    return { ok: true as const };
+  });
+
 export const pollIncidentsSince = createServerFn({ method: "GET" })
   .validator((iso: string) => iso)
   .handler(async ({ data: iso }) => {
     await ensureSeeded();
     await maybeEmitLiveIncident();
     const sql = await getSql();
-    const rows = await sql`
-      select * from incidents
-      where created_at > ${iso}
-      order by created_at asc
-      limit 50
-    `;
+    const demo = isBeaconDemo();
+    const rows = demo
+      ? await sql`
+          select * from incidents
+          where created_at > ${iso}
+          order by created_at asc
+          limit 50
+        `
+      : await sql`
+          select * from incidents
+          where created_at > ${iso} and demo = false
+          order by created_at asc
+          limit 50
+        `;
     return rows.map(mapIncident);
   });

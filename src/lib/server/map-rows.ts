@@ -27,6 +27,7 @@ export function mapIncident(row: Row): Incident {
     language: String(row.language ?? "en"),
     status: String(row.status ?? "open"),
     aidCents: asNumber(row.aid_cents),
+    demo: asBool(row.demo),
     createdAt: asIso(row.created_at),
     updatedAt: asIso(row.updated_at ?? row.created_at),
     resolvedAt: row.resolved_at == null ? null : asIso(row.resolved_at),

@@ -17,6 +17,7 @@ export type Incident = {
   language: string;
   status: IncidentStatus | string;
   aidCents: number;
+  demo: boolean;
   createdAt: string;
   updatedAt: string;
   resolvedAt: string | null;

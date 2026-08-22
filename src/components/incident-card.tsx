@@ -45,6 +45,7 @@ export function IncidentCard({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-medium">{meta.label}</p>
             <Badge variant={statusVariant(incident.status)}>{incident.status}</Badge>
+            {incident.demo ? <Badge variant="outline">DEMO</Badge> : null}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {incident.requesterName}
