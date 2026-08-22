@@ -1,6 +1,6 @@
 # Beacon Constitution
 
-Version **1.0.0** · 2026-08-22  
+Version **1.1.0** · 2026-08-22  
 Status: binding  
 Change rule: do not rewrite or expand this document unless explicitly asked. Amend only after a significant learning from testing or real users. Treat amendments like code: dated, versioned, committed.
 
@@ -26,11 +26,12 @@ Improve only what strengthens that mission. No new tabs, no visual-system rewrit
 2. **Do not replace the app.** Refine this codebase. No greenfield rewrite.
 3. **Official emergency services are first in policy. SOS is first in UI.** A way to call local numbers may sit *beside* SOS. It must never become the hero or shrink SOS.
 4. **Guest SOS without an account.** Authentication cannot sit in front of a medical emergency. Helpers who *claim* a signal may be asked to sign in.
-5. **Demo theater must never be confused with real distress.** Seeded incidents, synthetic “live” pins, play money, and estimated places are labeled DEMO or they are off. Production does not fake demand.
+5. **Demo theater must never be confused with real distress.** Seeded incidents, synthetic “live” pins, play money, and estimated places are labeled DEMO or they are off. Production does not fake demand. Demo is an **explicit feature flag** (`BEACON_DEMO`), not inferred from the database URL.
 6. **Do not lie after send.** Do not say the network is being alerted unless a human or a service was actually notified.
 7. **Precise victim data is not a public bulletin.** Exact coordinates, name, battery, pay flag, and panic notes are for the sender and for accepted helpers — not the world map.
 8. **Only the sender can cancel or close their signal** (or a documented timeout). Strangers may *request* close. They may not bury a ticket.
 9. **Hold SOS must not silently classify as medical.** The hold sends first. Type is unspecified emergency unless the requester has chosen otherwise. Correction happens after the signal is live, not as a form in front of the button.
+10. **SOS-flow changes must be reversible and isolated.** One named concern. No unrelated refactors. The hold button and home layout remain if the change is reverted. Do not couple SOS to wallet, chat, or places.
 
 ## 4. Workflow (this is the method)
 
@@ -42,7 +43,8 @@ Sequence, always:
 2. **Plan** — a focused implementation plan. No code.
 3. **Stop. Wait for approval.**
 4. **Implement** only the approved plan, smallest diff that preserves SOS.
-5. **Commit** when the named problem is actually solved.
+5. **Verify** against each acceptance criterion. Report. Then stop.
+6. **Commit** when the named problem is actually solved.
 
 One focused task at a time. One screen at a time when reviewing UI. Checkpoints exist to stop scope creep before it starts.
 
@@ -51,7 +53,7 @@ Out of bounds unless a later task names them: NG911, KYC, real money rails, help
 ## 5. SOS law (the product center)
 
 - One huge hold-to-send SOS. Location required (GPS or explicit city). Telemetry rides with the signal.
-- “Request specific help” is a parallel, lesser path. It must never out-rank SOS.
+- “Request specific help” is a parallel, lesser path. It must never out-rank SOS. Changes to SOS must leave that workflow unchanged.
 - After send, the requester sees a **live ticket**: signal is live, cancel/I’m OK, call local emergency, helper count, honest status. Not a wiki of wallet, two chats, and world-writable resolve.
 - False-alarm cancel is bound to the creating device/session.
 - Create is rate-limited and sanity-checked. Duplicates from the same guest + pin in a short window merge; they do not spawn a new emergency.
@@ -64,7 +66,7 @@ Out of bounds unless a later task names them: NG911, KYC, real money rails, help
 - `safety` / duress is not a world-map pin with a pay flag. Silent path is a later task; until then, do not make that type louder.
 - Public map and feed: area + type + time + language. Precise lat/lng and pay flag wait for an accepted helper or the sender.
 - Notification permission is not requested on first paint. Ask after someone opts into helping in a radius. Default helper radius is Nearby, not Worldwide.
-- Production wallet is off or labeled **Demo credit — not real money**. Fake payout next to a real hold is a trust kill.
+- Production wallet is off or labeled **Demo credit — not real money**. Fake payout next to a real hold is a trust kill. Do not mix wallet into the SOS row.
 - Places never show estimated pins as real facilities.
 - Translation of distress text through a public MT API is a later privacy task; do not expand it in SOS work.
 
@@ -76,6 +78,7 @@ A task is done when:
 - SOS remains the visual and interactive center.
 - No unapproved files, screens, or features shipped alongside it.
 - Demo vs real is still honest.
+- Each stated acceptance criterion is verified in a short report.
 - The change can be explained in one paragraph to a person who might hold SOS tonight.
 
 ## 8. Amendment log
@@ -83,3 +86,4 @@ A task is done when:
 | Version | Date | Why |
 |---|---|---|
 | 1.0.0 | 2026-08-22 | Initial constitution: SOS-central, review→plan→approve→code, no demo/real confusion. |
+| 1.1.0 | 2026-08-22 | Demo is an explicit flag, not DATABASE_URL. SOS changes must be reversible and isolated. Verify acceptance criteria before calling a task done. Specific-help workflow must remain unchanged when SOS is refined. |
