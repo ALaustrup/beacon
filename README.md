@@ -31,19 +31,38 @@ The app listens on `0.0.0.0:8080`.
 ```bash
 npm run typecheck
 npm run build
+npm test
+```
+
+`npm run build` emits the Nitro Vercel output only. It does **not** migrate a
+live database. Local PGLite still applies `migrations/*.sql` on startup.
+Remote schema is owned by `supabase/migrations` and the Supabase CLI.
+
+```bash
+npm run db:migrate   # explicit / legacy DATABASE_URL only
 ```
 
 ## Deploy
 
-Built for Vercel (`npm run build` emits the Nitro Vercel preset). When deployed, set:
+Vercel is the web host (Preview and Production). Nitro’s `vercel` preset is
+enabled on `vite build`. Deep links such as `/incident/:id` are server routes.
 
-| Variable | Purpose |
-| --- | --- |
-| `DATABASE_URL` | Postgres |
-| `BETTER_AUTH_SECRET` | Session signing |
-| `BETTER_AUTH_URL` | Public origin |
-| `GROK_AUTH_CLIENT_ID` / `GROK_AUTH_CLIENT_SECRET` | Sign-in via the Grok auth broker |
-| `XAI_API_KEY` | Optional higher-quality translation (MyMemory is the default fallback) |
+See `.env.example` for the full matrix. Summary:
+
+| Variable | Where | Notes |
+| --- | --- | --- |
+| `BEACON_DEMO` | server | **false** on Production. true on Preview only if you want labeled DEMO theater. |
+| `DATABASE_URL` | server | Supabase pooler when cut over. Unset → PGLite. Never `VITE_`. |
+| `BETTER_AUTH_SECRET` | server | Required in Production. |
+| `BETTER_AUTH_URL` | server | Public origin. Preview also trusts `*.vercel.app`. |
+| `GROK_AUTH_CLIENT_ID` / `SECRET` | server | Federated Google/X. |
+| `XAI_API_KEY` | server | Optional translation. |
+| `SUPABASE_SERVICE_ROLE_KEY` | server | Admin/seed only. Never ship to web or Capacitor. |
+| `VITE_AUTH_ENABLED` | public | Do not set `false` in Production. |
+| `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` | public | Client Broadcast only; RLS must hold. |
+
+Rollback: promote the previous Vercel deployment. Persistence rollback (later)
+is unset `DATABASE_URL` or `BEACON_PERSISTENCE=pglite`.
 
 ## License
 
