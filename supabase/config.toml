@@ -1,0 +1,22 @@
+# Beacon development project. Remote ref: pzjzlvxfoqchnziuwewl (us-west-1).
+# Schema is applied with the Supabase CLI / MCP — not by `npm run build`.
+
+project_id = "pzjzlvxfoqchnziuwewl"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[db.migrations]
+enabled = true
+schema_paths = []
+
+[realtime]
+enabled = true
