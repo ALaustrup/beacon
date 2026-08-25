@@ -5,8 +5,10 @@ import { formatCoord } from "@/lib/utils";
 
 export function DeviceStrip({
   device,
+  compact,
 }: {
   device: DeviceTelemetry & { locating: boolean; error: string | null };
+  compact?: boolean;
 }) {
   const coords =
     device.lat != null && device.lng != null
@@ -18,6 +20,16 @@ export function DeviceStrip({
     void navigator.clipboard.writeText(coords).then(() => {
       toast.success("Coordinates copied.");
     });
+  }
+
+  if (compact) {
+    return (
+      <p className="text-center text-xs text-subtle">
+        <span className="tabular">{coords ?? (device.locating ? "Finding location" : "Location unavailable")}</span>
+        {device.accuracyM != null ? ` · ±${Math.round(device.accuracyM)} m` : ""}
+        {device.batteryPct != null ? ` · ${device.batteryPct}%` : ""}
+      </p>
+    );
   }
 
   return (

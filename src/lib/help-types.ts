@@ -5,6 +5,8 @@ export const HELP_TYPES = [
     short: "Unspecified — sent from SOS",
     urgency: "critical",
   },
+  // `emergency` is the generic unspecified SOS fallback, not a medical diagnosis
+  // and not a claim that Beacon has classified a life-threatening event.
   {
     id: "medical",
     label: "Medical",
@@ -87,7 +89,11 @@ export const HELP_TYPE_IDS = HELP_TYPES.map((t) => t.id);
 /** Types shown in “Request specific help”. SOS-only `emergency` is excluded so that grid is unchanged. */
 export const SPECIFIC_HELP_TYPES = HELP_TYPES.filter((t) => t.id !== "emergency");
 
+/** Established generic SOS fallback. Not a medical diagnosis and not a severity claim. */
 export const SOS_HOLD_TYPE = "emergency" as const;
+
+/** Unspecified HELP ME / hold-to-SOS. Never remap this to medical. */
+export const UNSPECIFIED_HELP_TYPE = SOS_HOLD_TYPE;
 
 /** Post-signal chooser. Never blocks the hold. */
 export const SOS_TYPE_CORRECTIONS = [

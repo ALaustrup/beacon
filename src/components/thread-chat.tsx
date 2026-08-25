@@ -24,7 +24,7 @@ export function ThreadChat({
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [translated, setTranslated] = useState<Record<string, string>>({});
-  const bottom = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
 
   async function refresh() {
     const rows = await listChat({ data: { incidentId } });
@@ -39,7 +39,7 @@ export function ThreadChat({
   }, [incidentId]);
 
   useEffect(() => {
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    composer.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [messages.length]);
 
   useEffect(() => {
@@ -87,7 +87,7 @@ export function ThreadChat({
   return (
     <section className="space-y-3">
       {hideHeading ? null : <h2 className="font-display text-lg">Signal thread</h2>}
-      <div className="flex min-h-48 flex-col overflow-hidden rounded-xl border border-border bg-surface">
+      <div className="flex min-h-48 flex-col overflow-x-clip rounded-xl border border-border bg-surface">
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
           {messages.length === 0 ? (
             <p className="text-sm text-muted-foreground">
@@ -110,16 +110,20 @@ export function ThreadChat({
               </article>
             ))
           )}
-          <div ref={bottom} />
         </div>
-        <form onSubmit={(e) => void send(e)} className="flex gap-2 border-t border-border p-2">
+        <form
+          id="incident-composer"
+          ref={composer}
+          onSubmit={(e) => void send(e)}
+          className="above-mobile-nav flex gap-2 border-t border-border p-2"
+        >
           <Input
             id="incident-message-input"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="Update the people helping…"
           />
-          <Button type="submit" disabled={busy} size="sm">
+          <Button type="submit" disabled={busy} className="shrink-0">
             Send
           </Button>
         </form>
