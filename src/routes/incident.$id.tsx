@@ -3,6 +3,8 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { AppShell } from "@/components/app-shell";
 import { CallScripts } from "@/components/call-scripts";
+import { ContextQuestion } from "@/components/context-question";
+import { HelperCapabilities } from "@/components/helper-capabilities";
 import { ThreadChat } from "@/components/thread-chat";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +19,10 @@ import { Input } from "@/components/ui/input";
 import { statusVariant } from "@/components/incident-card";
 import { useCurrentUser } from "@/lib/auth/use-current-user";
 import { useActorName, useClientState } from "@/lib/client-state";
+import { contextFromUpdates, headlineFromUpdates } from "@/lib/help-context";
 import { verifiedEmergencyCall } from "@/lib/emergency";
+import { trackHelpEvent } from "@/lib/help-telemetry";
+import { isUnspecifiedHelpType } from "@/lib/help-taxonomy";
 import { bearingLabel, formatDistance, haversineKm } from "@/lib/geo";
 import {
   helpTypeById,
@@ -86,6 +91,11 @@ function IncidentPage() {
   }
 
   const meta = helpTypeById(detail.helpType);
+  const helpContext = contextFromUpdates(detail.updates);
+  const headline =
+    headlineFromUpdates(detail.updates) ||
+    (isUnspecifiedHelpType(detail.helpType) ? "Help needed" : meta.label);
+  const showEmergencyGuidance = Boolean(helpContext?.eg);
   const km =
     device.lat != null && device.lng != null
       ? haversineKm(device.lat, device.lng, detail.lat, detail.lng)
@@ -136,6 +146,7 @@ function IncidentPage() {
         data: { incidentId: id, authorName: actorName, authorId: actorId },
       });
       setConfirmClose(false);
+      trackHelpEvent("request_resolved");
       toast.success("Signal closed.");
       await refresh();
     } catch (err) {
@@ -205,7 +216,8 @@ function IncidentPage() {
   function openConversation() {
     setConversationOpen(true);
     window.setTimeout(() => {
-      document.getElementById("incident-conversation")?.scrollIntoView({ behavior: "smooth" });
+      const composer = document.getElementById("incident-composer");
+      composer?.scrollIntoView({ behavior: "smooth", block: "end" });
       document.getElementById("incident-message-input")?.focus();
     }, 50);
   }
@@ -221,7 +233,7 @@ function IncidentPage() {
       <div className="space-y-6">
         <header className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="font-display text-3xl tracking-tight">{meta.label}</h1>
+            <h1 className="font-display text-3xl tracking-tight">{headline}</h1>
             <Badge variant={statusVariant(detail.status)}>{detail.status}</Badge>
             {detail.demo ? <Badge variant="outline">DEMO</Badge> : null}
           </div>
@@ -240,8 +252,15 @@ function IncidentPage() {
           <p className="max-w-2xl text-base leading-relaxed">{detail.description}</p>
         </header>
 
+        {showEmergencyGuidance ? (
+          <p className="text-sm text-muted-foreground" role="status">
+            If anyone is in immediate danger, call emergency services now. Beacon is still looking for help.
+          </p>
+        ) : null}
+
         <OfficialCall
           countryCode={detail.countryCode}
+          onUsed={() => trackHelpEvent("emergency_cta_used", helpContext?.need)}
           onNeutralClick={
             isCreator
               ? () => {
@@ -252,6 +271,14 @@ function IncidentPage() {
                 }
               : undefined
           }
+        />
+
+        <ContextQuestion
+          incident={detail}
+          actorId={actorId}
+          actorName={actorName}
+          isCreator={isCreator}
+          onAnswered={() => void refresh()}
         />
 
         {isCreator && live ? (
@@ -295,10 +322,18 @@ function IncidentPage() {
             </div>
             <CallScripts incident={detail} />
             {myClaim ? (
-              <p className="text-sm">
-                You are helping · {roleLabel(myClaim.role)}
-                {etaLabel(myClaim.etaMinutes)}
-              </p>
+              <div className="space-y-3">
+                <p className="text-sm">
+                  You are helping · {roleLabel(myClaim.role)}
+                  {etaLabel(myClaim.etaMinutes)}
+                </p>
+                <HelperCapabilities
+                  incident={detail}
+                  actorName={actorName}
+                  authorId={user?.id ?? null}
+                  enabled
+                />
+              </div>
             ) : (
               <div className="space-y-3 rounded-xl border border-border bg-surface p-4">
                 <h2 className="font-display text-lg">I can help</h2>
@@ -350,7 +385,7 @@ function IncidentPage() {
           {latest ? (
             <p className="text-sm">
               <span className="text-subtle">{latest.authorName} · {timeAgo(latest.createdAt)} · </span>
-              {latest.body}
+              {latest.body.split("\n").find((line) => !line.startsWith("{")) ?? latest.body}
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">No updates yet.</p>
@@ -375,7 +410,7 @@ function IncidentPage() {
 
         <details
           id="incident-conversation"
-          className="rounded-xl border border-border bg-surface p-4"
+          className="above-mobile-nav rounded-xl border border-border bg-surface p-4"
           open={conversationOpen}
           onToggle={(e) => setConversationOpen((e.target as HTMLDetailsElement).open)}
         >
@@ -476,15 +511,19 @@ function IncidentPage() {
 function OfficialCall({
   countryCode,
   onNeutralClick,
+  onUsed,
 }: {
   countryCode: string | null;
   onNeutralClick?: () => void;
+  onUsed?: () => void;
 }) {
   const verified = verifiedEmergencyCall(countryCode);
   if (verified) {
     return (
       <Button asChild size="lg">
-        <a href={verified.href}>{verified.label}</a>
+        <a href={verified.href} onClick={onUsed}>
+          {verified.label}
+        </a>
       </Button>
     );
   }
